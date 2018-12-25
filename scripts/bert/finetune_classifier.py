@@ -40,6 +40,7 @@ import logging
 import numpy as np
 import mxnet as mx
 from mxnet import gluon
+import gluonnlp as nlp
 from gluonnlp.model import bert_12_768_12
 from bert import BERTClassifier, BERTRegression
 from tokenizer import FullTokenizer
@@ -113,9 +114,9 @@ task = tasks[args.task_name]
 if args.task_name in ['STS-B',]:
     trans = RegressionTransform(tokenizer, args.max_len)
 elif args.task_name in ['CoLA', 'SST']:
-    trans = ClassificationTransform(tokenizer, task.get_labels(), args.max_len, pair=False)
+    trans = ClassificationTransform(tokenizer, task.get_labels(), args.max_len, pair=False, pad=False)
 else:
-    trans = ClassificationTransform(tokenizer, task.get_labels(), args.max_len)
+    trans = ClassificationTransform(tokenizer, task.get_labels(), args.max_len, pad=False)
 
 
 if args.task_name == 'MNLI':
@@ -125,9 +126,20 @@ else:
     data_train = task('train').transform(trans)
     data_dev = task('dev').transform(trans)
 
+data_train_lengths = [l for _,l,_,_ in data_train]
 
-bert_dataloader = mx.gluon.data.DataLoader(data_train, batch_size=batch_size,
-                                           shuffle=True, last_batch='rollover')
+batch_sampler = nlp.data.sampler.FixedBucketSampler(data_train_lengths,
+                                    batch_size=batch_size,
+                                    num_buckets=10,
+                                    shuffle=True)
+
+batchify_fn = nlp.data.batchify.Tuple(nlp.data.batchify.Pad(axis=0),
+                                     nlp.data.batchify.Stack(),
+                                     nlp.data.batchify.Pad(axis=0),
+                                     nlp.data.batchify.Stack())
+
+bert_dataloader = mx.gluon.data.DataLoader(data_train,
+                                            batch_sampler=batch_sampler, batchify_fn=batchify_fn)
 bert_dataloader_dev = mx.gluon.data.DataLoader(data_dev, batch_size=test_batch_size,
                                                shuffle=False)
 
