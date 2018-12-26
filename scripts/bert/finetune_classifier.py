@@ -112,36 +112,43 @@ tasks = {
 task = tasks[args.task_name]
 
 if args.task_name in ['STS-B',]:
-    trans = RegressionTransform(tokenizer, args.max_len)
+    train_trans = RegressionTransform(tokenizer, args.max_len, pad=False)
+    dev_trans = RegressionTransform(tokenizer, args.max_len, pad=True)
 elif args.task_name in ['CoLA', 'SST']:
-    trans = ClassificationTransform(tokenizer, task.get_labels(), args.max_len, pair=False, pad=False)
+    train_trans = ClassificationTransform(tokenizer, task.get_labels(), args.max_len, pair=False, pad=False)
+    dev_trans  = ClassificationTransform(tokenizer, task.get_labels(), args.max_len, pair=False, pad=True)
 else:
-    trans = ClassificationTransform(tokenizer, task.get_labels(), args.max_len, pad=False)
+    train_trans = ClassificationTransform(tokenizer, task.get_labels(), args.max_len, pad=False)
+    dev_trans =  ClassificationTransform(tokenizer, task.get_labels(), args.max_len, pad=True)
+
 
 
 if args.task_name == 'MNLI':
-    data_train = task('dev_matched').transform(trans)
-    data_dev = task('dev_mismatched').transform(trans)
+    data_train = task('dev_matched').transform(train_trans, lazy=False)
+    data_dev = task('dev_mismatched').transform(dev_trans, lazy=False)
 else:
-    data_train = task('train').transform(trans)
-    data_dev = task('dev').transform(trans)
+    data_train = task('train').transform(train_trans, lazy=False)
+    data_dev = task('dev').transform(dev_trans, lazy=False)
 
-data_train_lengths = [l for _,l,_,_ in data_train]
-
-batch_sampler = nlp.data.sampler.FixedBucketSampler(data_train_lengths,
-                                    batch_size=batch_size,
-                                    num_buckets=10,
-                                    shuffle=True)
+data_train_len = data_train.transform(lambda input_id, length, segment_id, label_id: length, lazy=False)
 
 batchify_fn = nlp.data.batchify.Tuple(nlp.data.batchify.Pad(axis=0),
-                                     nlp.data.batchify.Stack(),
-                                     nlp.data.batchify.Pad(axis=0),
-                                     nlp.data.batchify.Stack())
+                                       nlp.data.batchify.Stack(),
+                                       nlp.data.batchify.Pad(axis=0),
+                                       nlp.data.batchify.Stack())
 
-bert_dataloader = mx.gluon.data.DataLoader(data_train,
-                                            batch_sampler=batch_sampler, batchify_fn=batchify_fn)
-bert_dataloader_dev = mx.gluon.data.DataLoader(data_dev, batch_size=test_batch_size,
-                                               shuffle=False)
+batch_sampler = nlp.data.sampler.FixedBucketSampler(data_train_len,
+                                                     batch_size=batch_size,
+                                                     num_buckets=10,
+                                                     ratio=0,
+                                                     shuffle=True)
+bert_dataloader = gluon.data.DataLoader(dataset=data_train, num_workers=1,
+                                         batch_sampler=batch_sampler,
+                                         batchify_fn=batchify_fn)
+
+bert_dataloader_dev = gluon.data.DataLoader(data_dev, batch_size=4,
+                                                num_workers=0, shuffle=False)
+
 
 def evaluate(metric):
     """Evaluate the model on validation dataset.
