@@ -37,6 +37,7 @@ sentence pair classification, with Gluon NLP Toolkit.
 import argparse
 import random
 import logging
+import time
 import numpy as np
 import mxnet as mx
 from mxnet import gluon
@@ -51,7 +52,9 @@ from dataset import MRPCDataset, QQPDataset, RTEDataset, \
 np.random.seed(0)
 random.seed(0)
 mx.random.seed(2)
-logging.getLogger().setLevel(logging.DEBUG)
+
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
 parser = argparse.ArgumentParser(description='BERT sentence pair classification example.'
                                              'We fine-tune the BERT model on MRPC')
@@ -69,10 +72,15 @@ parser.add_argument('--log_interval', type=int, default=10, help='report interva
 parser.add_argument('--max_len', type=int, default=128, help='Maximum length of the sentence pairs')
 parser.add_argument('--gpu', action='store_true', help='whether to use gpu for finetuning')
 args = parser.parse_args()
-logging.info(args)
+logger.info(args)
 batch_size = args.batch_size
 test_batch_size = args.test_batch_size
 lr = args.lr
+
+fh = logging.FileHandler("log_{}.txt".format(args.task_name))
+logger.addHandler(fh)
+sh = logging.StreamHandler()
+logger.addHandler(sh)
 
 ctx = mx.cpu() if not args.gpu else mx.gpu()
 
@@ -92,7 +100,7 @@ else:
     model.classifier.initialize(init=mx.init.Normal(0.02), ctx=ctx)
     loss_function = gluon.loss.SoftmaxCELoss()
 
-logging.info(model)
+logger.info(model)
 model.hybridize(static_alloc=True)
 loss_function.hybridize(static_alloc=True)
 
@@ -147,7 +155,7 @@ bert_dataloader = gluon.data.DataLoader(dataset=data_train, num_workers=1,
                                          batchify_fn=batchify_fn)
 
 bert_dataloader_dev = gluon.data.DataLoader(data_dev, batch_size=4,
-                                                num_workers=0, shuffle=False)
+                                                num_workers=1, shuffle=False)
 
 
 def evaluate(metric):
@@ -169,7 +177,7 @@ def evaluate(metric):
         metric_nm = [metric_nm,]
         metric_val = [metric_val,]
     metric_str = 'validation metrics:' + ','.join([i + ':{:.4f}' for i in metric_nm])
-    logging.info(metric_str.format(*metric_val))
+    logger.info(metric_str.format(*metric_val))
 
 
 def train(metric):
@@ -194,7 +202,7 @@ def train(metric):
     for epoch_id in range(args.epochs):
         metric.reset()
         step_loss = 0
-
+        tic = time.time()
         for batch_id, seqs in enumerate(bert_dataloader):
             step_num += 1
             if step_num < num_warmup_steps:
@@ -223,12 +231,15 @@ def train(metric):
                     metric_val = [metric_val,]
                 eval_str = '[Epoch {} Batch {}/{}] loss={:.4f}, lr={:.7f}, metrics=' + \
                     ','.join([i + ':{:.4f}' for i in metric_nm])
-                logging.info(eval_str.format(epoch_id, batch_id + 1, len(bert_dataloader), \
+                logger.info(eval_str.format(epoch_id, batch_id + 1, len(bert_dataloader), \
                     step_loss / args.log_interval, \
                     trainer_w.learning_rate, *metric_val))
                 step_loss = 0
         mx.nd.waitall()
         evaluate(metric)
+        toc = time.time()
+        logger.info('Time cost={:.1f}s'.format(toc - tic))
+        tic = toc
 
 if __name__ == '__main__':
     train(metric=task.get_metric())
